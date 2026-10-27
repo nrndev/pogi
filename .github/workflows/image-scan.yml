@@ -1,0 +1,35 @@
+name: image-scan
+# Scans the published image, ghcr.io/nrndev/pogi:latest, for known CVEs once a week. New CVEs appear after a
+# release ships, so the preflight scan of the build alone is not enough. Results go to the Security tab; a
+# fixable HIGH or CRITICAL CVE also fails the job, so GitHub sends the owner its failure email.
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scan:
+    if: github.repository == 'nrndev/pogi' # runs only in the public repo, not in forks or mirrors
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write # upload the results to the Security tab
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # The same pinned Trivy and the same flags as preflight: both come from scripts/security-scan.sh.
+      # This step fails on a fixable HIGH or CRITICAL CVE, so the upload below runs even then.
+      - run: scripts/ci.sh security image
+        env:
+          IMAGE: ghcr.io/nrndev/pogi:latest
+      - uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        if: ${{ !cancelled() }}
+        with:
+          sarif_file: scan-results/trivy-image.sarif
+          category: container-image

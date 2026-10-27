@@ -403,7 +403,8 @@ var countMark = regexp.MustCompile(`<!-- count:(\w+) -->.*?<!-- /count -->`)
 var bannerCount = regexp.MustCompile(`(pogi \S+  ·  )\d+ services`)
 
 // countPhrases are the counts the docs show, always with the depth split (the owner's rule), by kind:
-// "total" for all three clouds, "aws" for AWS alone.
+// "total" for all three clouds, "aws" for AWS alone. The README's table takes bare numbers, one per cell:
+// "<cloud>_services", "<cloud>_real" and "<cloud>_thin", where cloud is aws, gcp, azure or all.
 func countPhrases(sp map[string]*split) map[string]string {
 	a, g, z := sp["aws"], sp["gcp"], sp["azure"]
 	one := func(s *split) string { return fmt.Sprintf("%d with real behavior, %d Thin", s.Total-s.Thin, s.Thin) }
@@ -413,5 +414,10 @@ func countPhrases(sp map[string]*split) map[string]string {
 		total = fmt.Sprintf("%d services per cloud, %d in all: AWS has %s, Google Cloud %s, and Azure %s",
 			a.Total, 3*a.Total, one(a), one(g), one(z))
 	}
-	return map[string]string{"total": total, "aws": fmt.Sprintf("%d (%s)", a.Total, one(a))}
+	m := map[string]string{"total": total, "aws": fmt.Sprintf("%d (%s)", a.Total, one(a))}
+	all := &split{Total: a.Total + g.Total + z.Total, Thin: a.Thin + g.Thin + z.Thin}
+	for k, s := range map[string]*split{"aws": a, "gcp": g, "azure": z, "all": all} {
+		m[k+"_services"], m[k+"_real"], m[k+"_thin"] = fmt.Sprint(s.Total), fmt.Sprint(s.Total-s.Thin), fmt.Sprint(s.Thin)
+	}
+	return m
 }

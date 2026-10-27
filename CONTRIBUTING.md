@@ -28,16 +28,16 @@ Every CI job calls `scripts/ci.sh`, so you can run the same checks on your machi
 scripts/ci.sh                   # fmt, vet, build, cross, release-check, lint, workflows, and all test groups
 scripts/ci.sh lint              # one step (make lint)
 scripts/ci.sh groups            # the test group names, one per line
-scripts/ci.sh test aws-a-c      # the race tests of one group (make test G=aws-a-c)
+scripts/ci.sh test aws          # the race tests of one group: core, aws, azure or gcp (make test G=aws)
 scripts/ci.sh conformance aws   # one conformance block
 scripts/ci.sh gate              # race tests with Docker on, all conformance blocks, then the browser tests (make gate)
 ```
 
-- Steps: `fmt`, `vet`, `build`, `cross`, `release-check`, `lint`, `workflows`, `coverage`, `groups`,
+- Steps: `fmt`, `vet`, `build`, `compile`, `cross`, `release-check`, `lint`, `workflows`, `coverage`, `groups`,
   `test <group|all>`, `conformance [block ...]`, `security [tool ...]`, `e2e` and `gate`.
 - Tools you do not have are skipped with an install hint: golangci-lint, GoReleaser and zizmor
   (`brew install golangci-lint goreleaser zizmor`). In CI a missing tool fails the step.
-- The test groups split the packages by cloud and name, so CI jobs have about the same length. A new package
+- The test groups are core, aws, azure and gcp (the packages of each cloud, and the rest). A new package
   must be in exactly one group: `scripts/ci.sh coverage` fails until you add it to `group_pattern` in
   `scripts/ci.sh`.
 - CI runs the race tests with Docker off, so tests that need containers skip themselves. `gate` runs them.

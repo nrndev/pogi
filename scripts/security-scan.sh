@@ -9,7 +9,7 @@
 #   semgrep   Go, JS, Dockerfile and workflow code scan     (Semgrep)
 #   trivy     dependencies, secrets and misconfig in the tree (Trivy fs)
 #   secrets   secrets in the git history                    (Gitleaks)
-#   image     the Docker image                              (docker build, then Trivy image)
+#   image     the Docker image                              (docker build, then Trivy image; IMAGE=ref scans that image instead)
 #   dast      the running server, from outside              (OWASP ZAP; DAST_FULL=1 for the slow active scan)
 #
 # Each tool uses a program on your PATH when there is one, and a pinned Docker image when there is not.
@@ -70,6 +70,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The image to scan. Unset: the one build_image makes. IMAGE=ghcr.io/nrndev/pogi:latest scans a published image,
+# with no build (the weekly image-scan workflow does this).
+image=${IMAGE:-pogi:scan}
+
 # Builds the image once per run, so "image" and "dast" scan the same build.
 build_image() {
   [ "$built" = 1 ] && return 0
@@ -94,10 +98,10 @@ trivy_fs() {
 trivy_image() {
   name=$1; shift
   if have trivy; then
-    trivy image -o "$out/$name" "$@" pogi:scan
+    trivy image -o "$out/$name" "$@" "$image"
   else
     docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$out:/out" -v "$trivy_cache:/root/.cache" "$trivy_image" \
-      image -o "/out/$name" "$@" pogi:scan
+      image -o "/out/$name" "$@" "$image"
   fi
 }
 
@@ -196,12 +200,14 @@ scan_secrets() {
   row secrets "$ver" "$(count '"RuleID"' "$out/gitleaks.json") findings" gitleaks.json
 }
 
-# The Docker image: build it, then scan its packages with Trivy.
+# The Docker image: build it (unless IMAGE is set), then scan its packages with Trivy. Writes a SARIF file of the
+# fixable HIGH and CRITICAL findings too, for GitHub's Security tab.
 scan_image() {
   if ! docker_ok; then row image - "skipped: install Docker" -; return; fi
   if ! trivy_can_run; then row image - "skipped: install Trivy or Docker" -; return; fi
-  build_image || { row image docker "error: docker build failed" docker-build.log; return; }
+  [ -n "${IMAGE:-}" ] || build_image || { row image docker "error: docker build failed" docker-build.log; return; }
   trivy_image trivy-image.json --scanners vuln --format json --quiet || true
+  trivy_image trivy-image.sarif --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --format sarif --quiet || true
   rc=0
   trivy_image trivy-image-gate.txt --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --quiet || rc=$?
   res=$(trivy_counts "$out/trivy-image.json")

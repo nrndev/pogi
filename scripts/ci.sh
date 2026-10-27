@@ -7,6 +7,8 @@
 #   fmt              gofmt finds nothing to change
 #   vet              go vet ./...
 #   build            builds ./cmd/pogi and runs "pogi version"
+#   compile          compiles everything the other CI jobs compile (go build ./..., the -race test binaries, gotestsum)
+#                    so the checks job can save a warm Go build cache; runs no tests
 #   cross [os/arch ...]  builds ./cmd/pogi for the given platforms, default all six release ones (CGO off)
 #   release-check    goreleaser check (the release config)
 #   lint             golangci-lint (config: .golangci.yml)
@@ -39,24 +41,18 @@ platforms="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windo
 
 # --- test groups -------------------------------------------------------------
 # The only place the groups are defined. Each group is a pattern on the package path (it starts with "./",
-# the module root is "./."). They are balanced by test time and package count from a CI run with Docker off
-# (about 460 seconds in all). "coverage" fails when a package is in no group or in two, so a new package
-# makes CI fail until it is put in a group.
-test_groups="aws-a-c aws-d-g aws-h-l aws-m-z gcp-a-f gcp-g-z azure-a-b azure-c-e azure-f-z core"
+# the module root is "./."). One group per cloud, plus core. CI runs them side by side with Docker off (about
+# 17 minutes of test time in all, most of it compiling). "coverage" fails when a package is in no group or in two,
+# so a new package makes CI fail until it is put in a group.
+test_groups="core aws azure gcp"
 
 group_pattern() {
   case $1 in
-    aws-a-c)   echo 'internal/aws/[a-c]' ;;
-    aws-d-g)   echo 'internal/aws/[d-g]' ;; # includes aws/generic, a slow one
-    aws-h-l)   echo 'internal/aws/[h-l]' ;; # includes aws/lambda, a slow one
-    aws-m-z)   echo 'internal/aws/[m-z]' ;;
-    gcp-a-f)   echo 'internal/gcp/[a-f]' ;;
-    gcp-g-z)   echo 'internal/gcp/[g-z]' ;;
-    azure-a-b) echo 'internal/azure/[a-b]' ;;
-    azure-c-e) echo 'internal/azure/[c-e]' ;;
-    azure-f-z) echo 'internal/azure/[f-z]' ;;
-    core)      echo '(\.|cmd|scripts|test|internal/(aimodel|amqp|awstest|config|core|cost|docker|duckdb|mcp|seed|terraform|tui|web))(/|$)' ;;
-    *)         return 1 ;;
+    aws)   echo 'internal/aws(/|$)' ;;
+    azure) echo 'internal/azure(/|$)' ;;
+    gcp)   echo 'internal/gcp(/|$)' ;;
+    core)  echo '(\.|cmd|scripts|test|internal/(aimodel|amqp|awstest|config|core|cost|docker|duckdb|mcp|seed|terraform|tui|web))(/|$)' ;;
+    *)     return 1 ;;
   esac
 }
 
@@ -106,6 +102,14 @@ step_build() {
   "$tmp/pogi" version
 }
 
+# Fills the Go build cache with what the test and conformance jobs need. The flags must match theirs: -race
+# (step_test) and a plain build (conformance.sh, and the tests that run "go build" on pogi).
+step_compile() {
+  go build ./...
+  go test -race -count=1 -run '^$' ./...
+  go run "$gotestsum_pkg" --version >/dev/null
+}
+
 # step_cross [os/arch ...]: CI runs one platform per job, in parallel.
 step_cross() {
   [ $# -gt 0 ] || set -- $platforms
@@ -139,7 +143,7 @@ step_workflows() {
 
 step_groups() { for g in $test_groups; do echo "$g"; done; }
 
-# Every package is in exactly one group, and every group has a package.
+# Every package is in exactly one group, every group has a package, and every example folder has a conformance job.
 step_coverage() {
   pkgs=$(list_pkgs)
   problems=$(echo "$pkgs" | while read -r p; do
@@ -152,6 +156,15 @@ step_coverage() {
   for g in $test_groups; do
     echo "$pkgs" | grep -Eq "^\\./($(group_pattern "$g"))" || problems="$problems
 group $g matches no package"
+  done
+  # Every Thin example folder is a conformance block, and a preflight matrix entry must run it (or its cloud's
+  # "-thin" block), or CI would skip it without a word.
+  for dir in examples/terraform-*-thin-*/; do
+    name=$(basename "$dir"); cloud=${name#terraform-}; cloud=${cloud%%-thin-*}; group=${name#*-thin-}
+    [ "$cloud" = azure ] && cloud=azurerm
+    grep -Eq "^ +- \"(.* )?($cloud-$group|$cloud-thin)( .*)?\"$" .github/workflows/preflight.yml ||
+      problems="$problems
+$name is in no conformance job: add $cloud-$group to the blocks matrix in .github/workflows/preflight.yml"
   done
   [ -z "$problems" ] || { echo "$problems" >&2; return 1; }
   echo "coverage: $(echo "$pkgs" | wc -l | tr -d ' ') packages, each in one of $(echo "$test_groups" | wc -w | tr -d ' ') groups"
@@ -270,7 +283,7 @@ step_gate() {
 while [ $# -gt 0 ]; do
   s=$1; shift
   case $s in
-    fmt|vet|build|lint|workflows|coverage|groups|gate) "step_$s" ;;
+    fmt|vet|build|compile|lint|workflows|coverage|groups|gate) "step_$s" ;;
     cross) # takes the os/arch arguments that follow it
       ps=""; while [ $# -gt 0 ] && case $1 in */*) true ;; *) false ;; esac; do ps="$ps $1"; shift; done
       step_cross $ps ;;
@@ -278,6 +291,6 @@ while [ $# -gt 0 ]; do
     report) step_report "$@"; exit 0 ;;
     test|conformance|security|e2e) "step_$s" "$@"; exit $? ;; # these take the rest of the arguments
     notes) step_notes "${1:-}"; exit $? ;;
-    *) die "unknown step: $s (fmt vet build cross release-check lint workflows coverage groups test conformance security e2e notes gate)" ;;
+    *) die "unknown step: $s (fmt vet build compile cross release-check lint workflows coverage groups test conformance security e2e notes gate)" ;;
   esac
 done

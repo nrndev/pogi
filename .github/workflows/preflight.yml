@@ -10,12 +10,16 @@ concurrency:
   group: preflight-${{ github.ref }}
   cancel-in-progress: true
 # Every job calls scripts/ci.sh, so the same checks run on a laptop: scripts/ci.sh [step ...].
-# At most 20 jobs run side by side (the free plan's limit). The 10 test groups, 9 conformance blocks, and build,
-# lint, security and config make 23, so the last few wait for a free slot. The short "plan" job finishes
-# before the test groups start.
+# At most 20 jobs run side by side (the free plan's limit). 18 start at once: plan, checks, lint, config and
+# security (5), the 4 test groups, and the 9 conformance jobs. The 6 cross builds wait for checks, so the test and
+# conformance jobs get the first runner slots; they take the slots that free up as the short jobs finish. The
+# short "plan" job finishes before the test groups start.
 #
-# Each Go job has its own build cache (actions/cache, keyed by the job and go.sum), so a job restores the cache
-# that the same job saved. setup-go's single shared cache is off.
+# Go caches: one module cache (keyed by go.sum) and one build cache (keyed by the commit, restored from the
+# newest one). Every job only restores them (actions/cache/restore). The checks job saves them, after
+# it compiles everything the other jobs compile (go build, go vet, and the race test binaries), on a push to
+# main and on a pull request from a branch of this repo whose name starts with "ci-". A "ci-" branch is for
+# testing a workflow change, so its second run shows the warm time. setup-go's own cache is off.
 jobs:
   # The list of test groups comes from scripts/ci.sh, the only place they are defined.
   plan:
@@ -33,16 +37,11 @@ jobs:
           persist-credentials: false
       - id: groups
         run: echo "list=$(scripts/ci.sh groups | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
-  # Format, vet and build, then one cross-compile per release platform, all in parallel.
-  build:
+  # Format, vet and compile everything (the build and test binaries), then save the Go caches for the other jobs.
+  checks:
     if: github.repository == 'nrndev/pogi' # runs only in the public repo, not in forks or mirrors
-    name: build (${{ matrix.target }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [checks, linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64]
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -53,18 +52,59 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-          cache: false # the cache below is per job
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+          cache: false # the Go caches are restored below and saved by this job
+      - id: mod
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: build-${{ matrix.target }}-${{ hashFiles('go.sum') }}
-          restore-keys: build-${{ matrix.target }}-
-      - if: matrix.target == 'checks'
-        run: scripts/ci.sh fmt vet build
-      - if: matrix.target != 'checks'
-        run: scripts/ci.sh cross "$TARGET"
+          path: ~/go/pkg/mod
+          key: go-mod-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-build-${{ github.sha }}
+          restore-keys: go-build-
+      - run: scripts/ci.sh fmt vet build compile
+      - if: ${{ !cancelled() && steps.mod.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ hashFiles('go.sum') }}
+      - if: ${{ !cancelled() && (github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'ci-'))) }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-build-${{ github.sha }}
+  # One cross-compile per release platform, in parallel. They wait for checks so the test and conformance jobs
+  # get the first runner slots; they restore only the module cache.
+  cross:
+    needs: checks
+    if: github.repository == 'nrndev/pogi' # runs only in the public repo, not in forks or mirrors
+    name: cross (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64]
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      # Module cache only: a cross build uses other flags, so the build cache would not help.
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-
+      - run: scripts/ci.sh cross "$TARGET"
         env:
           TARGET: ${{ matrix.target }}
   # golangci-lint (config: .golangci.yml). The action installs it and keeps its own result cache.
@@ -82,19 +122,34 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-          cache: false # the cache below is per job
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+          cache: false # the Go caches are restored below
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-lint-${{ hashFiles('go.sum') }}
-          restore-keys: go-lint-
+          path: ~/go/pkg/mod
+          key: go-mod-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-build-${{ github.sha }}
+          restore-keys: go-build-
+      # golangci-lint's own result cache: small, one per commit, restored from the newest. Saved on the same
+      # events as the build cache, and even when lint finds something, so the next run is warm.
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-${{ github.sha }}
+          restore-keys: golangci-lint-
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0 # pinned golangci-lint: a new release may add checks that fail the build
           install-only: true
       - run: scripts/ci.sh lint
+      - if: ${{ !cancelled() && (github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'ci-'))) }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-${{ github.sha }}
   # The config files themselves: every package is in one test group, the workflows are clean (actionlint,
   # zizmor), and the release config is valid.
   config:
@@ -145,14 +200,17 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-          cache: false # the cache below is per group
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+          cache: false # the Go caches are restored below
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-test-${{ matrix.group }}-${{ hashFiles('go.sum') }}
-          restore-keys: go-test-${{ matrix.group }}-
+          path: ~/go/pkg/mod
+          key: go-mod-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-build-${{ github.sha }}
+          restore-keys: go-build-
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
@@ -170,17 +228,33 @@ jobs:
           path: test-results
           retention-days: 7
           if-no-files-found: ignore
-  # Real Terraform and CDK projects against a fresh pogi, one block per job, side by side. Docker is on here:
-  # the compute and azurerm blocks need it. Provider and npm downloads are cached between runs, with the Go
-  # build cache.
+  # Real Terraform and CDK projects against a fresh pogi, one job per entry, side by side. Docker is on here:
+  # the compute and azurerm blocks need it. Terraform providers and npm packages are downloaded on each run (no
+  # cache of them: they would use the space the Go caches need). TF_PLUGIN_CACHE_DIR only shares a download
+  # between the blocks of one job.
   conformance:
     if: github.repository == 'nrndev/pogi' # runs only in the public repo, not in forks or mirrors
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    name: conformance (${{ matrix.blocks }})
     strategy:
       fail-fast: false
       matrix:
-        block: [aws, compute, google, azurerm, longtail, google-thin, azurerm-thin, aws-thin, cdk]
+        # Each entry is the blocks one job runs, one after the other (scripts/conformance.sh takes several).
+        # Balanced by the time each takes, so no job runs much over 6.5 minutes: the azurerm provider waits
+        # minutes on some deletes (ALB 5 min, hubs and policy 5 min, key vault 2 min), so those have a job each.
+        # A "terraform-<cloud>-thin-<group>" example folder is the block <google|azurerm|aws>-<group>;
+        # "scripts/ci.sh coverage" fails when a folder is in no entry.
+        blocks:
+          - "azurerm"
+          - "azurerm-a2-alb"
+          - "azurerm-a2-hubs"
+          - "azurerm-a2-data azurerm-a2-net azurerm-a2-sec"
+          - "aws aws-aws-b"
+          - "compute cdk"
+          - "google google-thin"
+          - "longtail aws-aws-a"
+          - "aws-c azurerm-a2-compute"
     env:
       TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.tf-plugins
     steps:
@@ -193,7 +267,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-          cache: false # the cache below is per block
+          cache: false # the Go caches are restored below
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
@@ -203,22 +277,24 @@ jobs:
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_wrapper: false
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
-          path: |
-            .tf-plugins
-            ~/.npm
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: conformance-${{ matrix.block }}-${{ hashFiles('go.sum', 'examples/**/*.tf', 'examples/cdk/package.json') }}
-          restore-keys: conformance-${{ matrix.block }}-
-      - run: scripts/ci.sh conformance "$BLOCK"
+          path: ~/go/pkg/mod
+          key: go-mod-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-build-${{ github.sha }}
+          restore-keys: go-build-
+      # $BLOCKS is one argument with a block name per word; conformance.sh reads it as a list.
+      - run: scripts/ci.sh conformance "$BLOCKS"
         env:
-          BLOCK: ${{ matrix.block }}
+          BLOCKS: ${{ matrix.blocks }}
   security:
     if: github.repository == 'nrndev/pogi' # runs only in the public repo, not in forks or mirrors
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15 # the image build compiles pogi inside Docker
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -229,15 +305,21 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-          cache: false # the cache below is per job
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+          cache: false # the Go caches are restored below
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-security-${{ hashFiles('go.sum') }}
-          restore-keys: go-security-
+          path: ~/go/pkg/mod
+          key: go-mod-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-build-${{ github.sha }}
+          restore-keys: go-build-
       # govulncheck fails if pogi's code calls a Go module with a known vulnerability. Trivy fails on fixable
       # HIGH or CRITICAL vulnerabilities and on secrets. Config scanning (Dockerfiles, examples/terraform) only
       # reports, because the owner is still picking which findings to fix.
-      - run: scripts/ci.sh security vuln trivy
+      # "image" builds Dockerfile and runs Trivy on it, and fails on a fixable HIGH or CRITICAL CVE. The image
+      # that ships (Dockerfile.release, built by GoReleaser) has the same Alpine base and apk packages, so this
+      # covers what ships. Docker is on the runner; the Trivy image is pinned in scripts/security-scan.sh.
+      - run: scripts/ci.sh security vuln trivy image
