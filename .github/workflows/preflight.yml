@@ -10,16 +10,16 @@ concurrency:
   group: preflight-${{ github.ref }}
   cancel-in-progress: true
 # Every job calls scripts/ci.sh, so the same checks run on a laptop: scripts/ci.sh [step ...].
-# At most 20 jobs run side by side (the free plan's limit). 18 start at once: plan, checks, lint, config and
-# security (5), the 4 test groups, and the 9 conformance jobs. The 6 cross builds wait for checks, so the test and
-# conformance jobs get the first runner slots; they take the slots that free up as the short jobs finish. The
-# short "plan" job finishes before the test groups start.
+# At most 20 jobs run side by side (the free plan's limit). Up to 20 start at once: plan, checks, cache (on
+# main and "ci-" branches only), lint, config, security, the 4 test groups and the 9 conformance jobs. The 6
+# cross builds wait for checks, so the test and conformance jobs get the first runner slots. The short "plan"
+# job finishes before the test groups start.
 #
 # Go caches: one module cache (keyed by go.sum) and one build cache (keyed by the commit, restored from the
-# newest one). Every job only restores them (actions/cache/restore). The checks job saves them, after
-# it compiles everything the other jobs compile (go build, go vet, and the race test binaries), on a push to
-# main and on a pull request from a branch of this repo whose name starts with "ci-". A "ci-" branch is for
-# testing a workflow change, so its second run shows the warm time. setup-go's own cache is off.
+# newest one). Every job only restores them (actions/cache/restore). The cache job saves them, after it
+# compiles everything the other jobs compile, on a push to main and on a pull request from a branch of this repo
+# whose name starts with "ci-". A "ci-" branch is for testing a workflow change, so its second run shows the
+# warm time. setup-go's own cache is off.
 jobs:
   # The list of test groups comes from scripts/ci.sh, the only place they are defined.
   plan:
@@ -37,7 +37,7 @@ jobs:
           persist-credentials: false
       - id: groups
         run: echo "list=$(scripts/ci.sh groups | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
-  # Format, vet and compile everything (the build and test binaries), then save the Go caches for the other jobs.
+  # Format, vet and build, with the Go caches restored. The cross builds wait for this short job.
   checks:
     if: github.repository == 'nrndev/pogi' # runs only in the public repo, not in forks or mirrors
     runs-on: ubuntu-latest
@@ -52,7 +52,36 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-          cache: false # the Go caches are restored below and saved by this job
+          cache: false # the Go caches are restored below
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-build-${{ github.sha }}
+          restore-keys: go-build-
+      - run: scripts/ci.sh fmt vet build
+  # Compiles everything the other jobs compile and saves the two Go caches, for the next run. It runs beside
+  # the others and nothing waits for it. From an empty cache it takes over 15 minutes on a hosted runner;
+  # from the last commit's cache, a few.
+  cache:
+    if: github.repository == 'nrndev/pogi' && (github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'ci-')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: false # this job saves the Go caches itself
       - id: mod
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
@@ -64,14 +93,13 @@ jobs:
           path: ~/.cache/go-build
           key: go-build-${{ github.sha }}
           restore-keys: go-build-
-      - run: scripts/ci.sh fmt vet build compile
-      - if: ${{ !cancelled() && steps.mod.outputs.cache-hit != 'true' }}
+      - run: scripts/ci.sh compile
+      - if: steps.mod.outputs.cache-hit != 'true'
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~/go/pkg/mod
           key: go-mod-${{ hashFiles('go.sum') }}
-      - if: ${{ !cancelled() && (github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'ci-'))) }}
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+      - uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~/.cache/go-build
           key: go-build-${{ github.sha }}

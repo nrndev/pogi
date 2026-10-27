@@ -104,9 +104,12 @@ step_build() {
 
 # Fills the Go build cache with what the test and conformance jobs need. The flags must match theirs: -race
 # (step_test) and a plain build (conformance.sh, and the tests that run "go build" on pogi).
+# "go list -export" compiles every package, test variants too, without linking or starting a test binary, so it
+# is much faster than "go test -run '^$'". Only each test's small generated main is left to compile.
 step_compile() {
   go build ./...
-  go test -race -count=1 -run '^$' ./...
+  go list -test -export -deps ./... >/dev/null
+  go list -race -test -export -deps ./... >/dev/null
   go run "$gotestsum_pkg" --version >/dev/null
 }
 

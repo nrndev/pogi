@@ -187,7 +187,7 @@ You can also download a binary for Linux, macOS or Windows, on Intel or Arm, fro
 Most services run inside pogi itself. The ones marked "with Docker running" start real software, such as Postgres, Redis or Kafka, in Docker (or any engine with the Docker API: Podman, Colima or OrbStack).
 
 <details>
-<summary>Show every service</summary>
+<summary><!-- count:total -->355 services: 144 AWS (90 with real behavior, 54 Thin), 108 Google Cloud (25 with real behavior, 83 Thin) and 103 Azure (30 with real behavior, 73 Thin)<!-- /count -->. Click to see them all.</summary>
 
 <!-- services:start (generated from the registry and docs/reference/coverage.yaml by `go generate .`) -->
 | Cloud | Services |
