@@ -230,7 +230,7 @@
   });
   document.addEventListener('input', e => { if (e.target.id === 'pq') { clearTimeout(pt); pt = setTimeout(() => search(e.target.value), 120); } });
   document.addEventListener('htmx:afterSwap', e => {
-    if (e.detail.target.id !== 'drawer') return;
+    if (e.detail.target?.id !== 'drawer') return; // a page htmx restores from its history (Back) has no target
     const d = $('#drawer'); if (!d.innerHTML.trim()) return;
     if (!marked) mark(); marked = false;
     scrim(); d.classList.add('on'); sync(); a11y(d); linkErrors(d);
@@ -722,7 +722,7 @@
     $('#tf-fcount', d).textContent = `${n} of ${rows.length} sizes`;
   }
   ['input', 'change'].forEach(ev => document.addEventListener(ev, e => { if (e.target.closest && e.target.closest('[data-tf-sizes]')) sizeFilter(); }));
-  document.addEventListener('htmx:afterSwap', e => { if (e.detail.target.id === 'drawer') sizeFilter(); });
+  document.addEventListener('htmx:afterSwap', e => { if (e.detail.target?.id === 'drawer') sizeFilter(); });
 
   // ---- events ----
   document.addEventListener('click', e => {
