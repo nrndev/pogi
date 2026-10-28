@@ -271,7 +271,7 @@ details.more summary { cursor: pointer; color: var(--dim); font-weight: 550; mar
 .pop h3 { margin: 0 0 8px; font-size: 12px; display: flex; gap: 7px; align-items: center; }
 .pop .grp { padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
 .pop .grp:last-of-type { border: 0; margin: 0; }
-.menu { position: fixed; min-width: 200px; background: var(--panel); border: 1px solid var(--line2); border-radius: 9px; box-shadow: var(--shadow); padding: 4px; z-index: 40; display: none; }
+.menu { position: fixed; min-width: 200px; background: var(--panel); border: 1px solid var(--line2); border-radius: 9px; box-shadow: var(--shadow); padding: 4px; z-index: 40; display: none; overflow-y: auto; }
 .menu.on { display: block; }
 .menu a { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; cursor: pointer; }
 .menu a:hover { background: var(--hover); }

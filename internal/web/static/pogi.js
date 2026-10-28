@@ -112,6 +112,13 @@
   let marked = false;   // openDrawer already recorded the opener
   function openDrawer(url) { mark(); marked = true; closeAll(); htmx.ajax('GET', url, { target: '#drawer', swap: 'innerHTML' }); }
   function anchor(el, pop, width) { const b = el.getBoundingClientRect(); pop.style.top = b.bottom + 6 + 'px'; pop.style.left = Math.max(12, Math.min(innerWidth - width - 12, b.right - width)) + 'px'; }
+  // a shown menu taller than the room below its button scrolls, and opens above the button when there is more room there
+  function fit(el, menu) {
+    const b = el.getBoundingClientRect(), below = innerHeight - b.bottom - 18, above = b.top - 18;
+    menu.style.maxHeight = ''; const h = menu.offsetHeight; if (h <= below) return;
+    if (above > below) { const m = Math.min(h, above); menu.style.maxHeight = m + 'px'; menu.style.top = b.top - 6 - m + 'px'; }
+    else menu.style.maxHeight = below + 'px';
+  }
 
   // ---- labels and errors ----
   let uid = 0;
@@ -219,7 +226,7 @@
       closeAll(); menu.innerHTML = (m.nextElementSibling || {}).innerHTML || ''; menu.dataset.for = m.dataset.menu;
       menu.querySelectorAll('a, button').forEach(x => { x.setAttribute('role', 'menuitem'); x.tabIndex = -1; });
       menu.querySelectorAll('hr').forEach(x => x.setAttribute('role', 'separator'));
-      htmx.process(menu); anchor(m, menu, 210); show(menu); const f = menu.querySelector('[role=menuitem]'); if (f) f.focus(); return;
+      htmx.process(menu); anchor(m, menu, 210); show(menu); fit(m, menu); const f = menu.querySelector('[role=menuitem]'); if (f) f.focus(); return;
     }
     // [data-drawer] opens its href (or its own value) in the drawer, unless the click was on a control inside it
     const d = t.closest('[data-drawer]');
