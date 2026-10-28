@@ -4,8 +4,8 @@ on:
     tags: ["v*"]
 permissions:
   contents: read
-# Tests and conformance ran in preflight on the tagged commit; this workflow checks that, then builds, signs and
-# publishes, then smoke-tests what it published.
+# Tests and conformance ran in preflight on the tagged commit; this workflow checks that and scans for known
+# vulnerabilities again, then builds, signs and publishes, then smoke-tests and scans what it published.
 jobs:
   preflight-passed:
     if: github.repository == 'nrndev/pogi' # runs only in the public repo, not in forks or mirrors
@@ -26,8 +26,31 @@ jobs:
           c=$(gh api "repos/$REPO/actions/workflows/preflight.yml/runs?head_sha=$SHA&status=completed" --jq '.workflow_runs[0].conclusion')
           echo "preflight: ${c:-no completed run}"
           [ "$c" = success ] || { echo "preflight has not passed on this commit; nothing is published."; exit 1; }
+  # The preflight scans again, with today's list of known vulnerabilities: one can be published after preflight
+  # passed. govulncheck, Trivy on the tree (fixable HIGH or CRITICAL CVEs, secrets) and Trivy on an image built
+  # from Dockerfile. That image stands in for the ones GoReleaser builds: Dockerfile.release has the same final
+  # stage (the pinned Alpine and the same apk line), and both use the same Go and build flags. A finding fails
+  # this job, and nothing is published.
+  scan:
+    if: github.repository == 'nrndev/pogi' # runs only in the public repo, not in forks or mirrors
+    runs-on: ubuntu-latest
+    timeout-minutes: 15 # the image build compiles pogi inside Docker
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: scripts/ci.sh security vuln trivy image
   goreleaser:
-    needs: preflight-passed
+    needs: [preflight-passed, scan]
     if: github.repository == 'nrndev/pogi' # runs only in the public repo, not in forks or mirrors
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -51,6 +74,8 @@ jobs:
           go-version-file: go.mod
           cache: false # a release is built from a clean cache
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        with:
+          cache-image: false # no caches in the release, like preflight
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
@@ -151,3 +176,14 @@ jobs:
           else
             echo "::warning::the image is not public yet: make the GHCR package public, then rerun this job"
           fi
+  # The exact image just published, scanned by the weekly image-scan workflow: the results go to the Security tab.
+  # It cannot stop the release, which is already out. A finding fails this job, so GitHub emails the owner.
+  image-scan:
+    needs: goreleaser
+    if: github.repository == 'nrndev/pogi' # runs only in the public repo, not in forks or mirrors
+    permissions:
+      contents: read
+      security-events: write # upload the results to the Security tab
+    uses: ./.github/workflows/image-scan.yml # zizmor: ignore[self-repository] the pinned actionlint rejects the newer $/ form
+    with:
+      tag: ${{ github.ref_name }}

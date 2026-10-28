@@ -128,6 +128,7 @@ scan_vuln() {
   # govulncheck exits 3 for a called vulnerability, but "go run" turns that into 1. So go by the report.
   if [ "$n" -gt 0 ]; then
     row vuln "${ver:-govulncheck}" "FAIL: $n called vulnerabilities (a newer Go may clear the standard library ones)" govulncheck.txt; fail=1
+    cat "$out/govulncheck.txt" >&2
   elif [ $rc != 0 ]; then
     row vuln "${ver:-govulncheck}" "error (exit $rc), see the file" govulncheck.txt
   else
@@ -177,7 +178,9 @@ scan_trivy() {
   trivy_fs trivy-fs-gate-secret.txt --scanners secret --exit-code 1 --quiet || sc=$?
   res=$(trivy_counts "$out/trivy-fs.json")
   if [ $rc != 0 ] || [ $sc != 0 ]; then
-    [ $rc != 0 ] && res="$res; FAIL: fixable HIGH/CRITICAL CVE"
+    # The CVE table goes to the log, so a CI run shows which one failed. The secret gate is not printed: no
+    # secret goes into a log.
+    [ $rc != 0 ] && { res="$res; FAIL: fixable HIGH/CRITICAL CVE"; cat "$out/trivy-fs-gate-vuln.txt" >&2 || true; }
     [ $sc != 0 ] && res="$res; FAIL: secret found"
     fail=1
   fi
@@ -211,7 +214,7 @@ scan_image() {
   rc=0
   trivy_image trivy-image-gate.txt --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --quiet || rc=$?
   res=$(trivy_counts "$out/trivy-image.json")
-  if [ $rc != 0 ]; then res="$res; FAIL: fixable HIGH/CRITICAL CVE"; fail=1; fi
+  if [ $rc != 0 ]; then res="$res; FAIL: fixable HIGH/CRITICAL CVE"; fail=1; cat "$out/trivy-image-gate.txt" >&2 || true; fi
   row image "$(trivy_version)" "$res" trivy-image.json
 }
 

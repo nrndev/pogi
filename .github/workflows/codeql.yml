@@ -1,10 +1,11 @@
 name: codeql
 # CodeQL scans the Go code for security bugs (SAST) and shows what it finds in the Security tab.
+# It runs once a week on main and on each release tag, not on every push or pull request: a scan takes about
+# 40 minutes and holds one of the account's 20 runner slots all that time. Every commit on public main is a
+# release and gets a tag, so every shipped commit is scanned. A release does not wait for this scan.
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    tags: ["v*"]
   schedule:
     - cron: "41 4 * * 3"
 permissions:

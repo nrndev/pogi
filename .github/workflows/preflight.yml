@@ -13,7 +13,8 @@ concurrency:
 #
 # Jobs: plan (the list of test groups), 7 "lint and test" jobs, 8 conformance jobs, one "config" job (config
 # checks and security scans) and one "cross" job: 18 at once. The free plan allows 20 at once for the whole
-# account, and CodeQL holds one for a long time, so stay at 18 or fewer.
+# account. CodeQL and the scheduled scans run weekly and on release tags, not here, but may hold a slot when
+# they do, so stay at 18 or fewer.
 #
 # No caches. Every job starts cold, so every run takes about the same time and there is nothing to keep up.
 # setup-go's own cache is off. The slowest jobs are bound by the azurerm provider's own waits, not by compiling.
