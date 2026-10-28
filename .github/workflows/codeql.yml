@@ -10,6 +10,9 @@ on:
     - cron: "41 4 * * 3"
 permissions:
   contents: read
+# Retry a module download once when proxy.golang.org drops it halfway (see preflight.yml).
+env:
+  GOPROXY: https://proxy.golang.org|https://proxy.golang.org,direct
 jobs:
   analyze:
     if: github.repository == 'nrndev/pogi' # runs only in the public repo, not in forks or mirrors

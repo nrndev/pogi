@@ -4,6 +4,9 @@ on:
     tags: ["v*"]
 permissions:
   contents: read
+# Retry a module download once when proxy.golang.org drops it halfway (see preflight.yml).
+env:
+  GOPROXY: https://proxy.golang.org|https://proxy.golang.org,direct
 # Tests and conformance ran in preflight on the tagged commit; this workflow checks that and scans for known
 # vulnerabilities again, then builds, signs and publishes, then smoke-tests and scans what it published.
 jobs:

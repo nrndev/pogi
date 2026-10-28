@@ -9,6 +9,12 @@ permissions:
 concurrency:
   group: preflight-${{ github.ref }}
   cancel-in-progress: true
+# proxy.golang.org sometimes drops a module download halfway ("stream error ... INTERNAL_ERROR"). With no module
+# cache every job downloads its modules afresh, so one dropped download used to fail a job. "|" tells Go to try the
+# next entry on any error, so listing the proxy twice retries a failed download once (Go empties the half-written
+# file first). ",direct" is Go's default: fetch from the source only when the proxy does not have a module.
+env:
+  GOPROXY: https://proxy.golang.org|https://proxy.golang.org,direct
 # Every job calls scripts/ci.sh, so the same checks run on a laptop: scripts/ci.sh [step ...].
 #
 # Jobs: plan (the list of test groups), 7 "lint and test" jobs, 8 conformance jobs, one "config" job (config

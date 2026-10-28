@@ -18,7 +18,9 @@ work=$(mktemp -d)
 port=${POGI_PORT:-4599}
 region=${REGION:-us-east-1} # Terraform's; us-gov-west-1 and cn-north-1 cover the other partitions
 ep=http://localhost:$port
-trap 'kill $pid 2>/dev/null; rm -rf "$work"' EXIT
+# pid is unset until pogi starts (a failed build exits before that), and pogi may already be gone, so neither may
+# stop the cleanup.
+trap '[ -z "${pid:-}" ] || kill "$pid" 2>/dev/null || true; rm -rf "$work"' EXIT
 
 # nodrift <terraform|tfd>: a second plan must find nothing to change. On drift, print what it wanted to change.
 nodrift() { "$1" plan -detailed-exitcode -input=false -no-color > "$work/plan.txt" 2>&1 || { cat "$work/plan.txt" >&2; return 1; }; }
