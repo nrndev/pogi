@@ -11,8 +11,8 @@ make generate                   # rewrite docs/reference/coverage.md and the REA
 ```
 
 - Format code with `gofmt`. CI fails if `gofmt -l .` lists a file.
-- CI (the `preflight` workflow) runs `gofmt`, `go vet`, golangci-lint, the race tests, a cross-compile for six platforms and the
-  conformance blocks. See "Run CI locally" below.
+- CI (the `preflight` workflow) runs `gofmt`, golangci-lint (which includes every `go vet` check) and the race tests (lint and
+  tests in the same job), a cross-compile for three platforms and the conformance blocks. It uses no caches. See "Run CI locally" below.
 - If you change a service, run `make generate`. A test fails when the generated
   coverage files are out of date, or when a registered service has no row in
   `docs/reference/coverage.yaml`.
@@ -26,18 +26,20 @@ Every CI job calls `scripts/ci.sh`, so you can run the same checks on your machi
 
 ```
 scripts/ci.sh                   # fmt, vet, build, cross, release-check, lint, workflows, and all test groups
-scripts/ci.sh lint              # one step (make lint)
+scripts/ci.sh lint              # one step: every package (make lint)
+scripts/ci.sh lint gcp          # one test group's packages, built with -race, as a CI test job does it
 scripts/ci.sh groups            # the test group names, one per line
-scripts/ci.sh test aws-a-c      # the race tests of one group (make test G=aws-a-c)
+scripts/ci.sh test aws-a-f      # the race tests of one group (see groups below) (make test G=aws-a-f)
 scripts/ci.sh conformance aws   # one conformance block
 scripts/ci.sh gate              # race tests with Docker on, all conformance blocks, then the browser tests (make gate)
 ```
 
-- Steps: `fmt`, `vet`, `build`, `cross`, `release-check`, `lint`, `workflows`, `coverage`, `groups`,
+- Steps: `fmt`, `vet`, `build`, `cross [os/arch ...]`, `release-check`, `lint [group]`, `workflows`, `coverage`, `groups`,
   `test <group|all>`, `conformance [block ...]`, `security [tool ...]`, `e2e` and `gate`.
 - Tools you do not have are skipped with an install hint: golangci-lint, GoReleaser and zizmor
   (`brew install golangci-lint goreleaser zizmor`). In CI a missing tool fails the step.
-- The test groups split the packages by cloud and name, so CI jobs have about the same length. A new package
+- The test groups are core, aws-a-f, aws-g-m, aws-n-z, azure-a-c, azure-d-z and gcp: the packages of each cloud, with aws and
+  azure split by the first letter of the service folder, and the rest in core. A new package
   must be in exactly one group: `scripts/ci.sh coverage` fails until you add it to `group_pattern` in
   `scripts/ci.sh`.
 - CI runs the race tests with Docker off, so tests that need containers skip themselves. `gate` runs them.

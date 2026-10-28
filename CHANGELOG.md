@@ -7,6 +7,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Security
+
+- **The container image is scanned for known CVEs.** Every preflight builds the image and fails on a fixable HIGH or CRITICAL CVE. Each release runs the scans again before it publishes anything. The published image is scanned right after each release and once a week, with the results in GitHub's Security tab.
+- **CodeQL scans the Go code weekly and on each release,** not on every push and pull request.
+
 ## [0.2.0] - 2026-10-27
 
 ### Security

@@ -48,7 +48,7 @@ func rtFreePort(t *testing.T) int {
 func rtBuildPogi(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "pogi")
-	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+	if out, err := exec.Command("go", append(goBuildArgs(), "-o", bin, ".")...).CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	return bin

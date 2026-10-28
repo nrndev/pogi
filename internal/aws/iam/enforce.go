@@ -19,12 +19,13 @@ import (
 // organization, its service control policies. Root and the default test
 // credentials are never checked.
 //
-// ponytail: resource-based policies and session policies are not evaluated;
-// resources come from common request parameters and a request whose resource
-// pogi cannot tell matches any Allow statement.
-// S3 bucket policies are evaluated (withBucketPolicy). ponytail: other
-// resource-based policies, permissions boundaries and session policies are not evaluated; resources come from common request parameters and
-// a request whose resource pogi cannot tell matches any Allow statement.
+// S3 bucket policies are evaluated too (withBucketPolicy), and so are the Deny
+// statements of API Gateway resource policies (ResourcePolicyDenies).
+// ponytail: other resource-based policies, session policies and role trust
+// policies (on AssumeRole) are not evaluated, and SCPs do not restrict a member
+// account's root user as they do on AWS. Resources come from common request
+// parameters, and a request whose resource pogi cannot tell matches any Allow
+// statement.
 
 // scpSource is the organizations service: the SCP documents that govern an
 // account, one list per level from the root down (nil when none apply).

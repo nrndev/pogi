@@ -1,6 +1,6 @@
-# Thin application services of pogi's generic Azure engine: Static Web Apps, Web PubSub, Notification Hubs,
+# Thin application services of pogi's generic Azure engine: Static Web Apps, Web PubSub,
 # Relay, IoT Hub, Azure Maps, Automation and Recovery Services. They are stored and read back; nothing runs
-# behind them (no site is served, no message flows, no runbook runs, no backup is taken).
+# behind them (Notification Hubs are in terraform-azure-thin-a2-hubs; no site is served, no message flows, no runbook runs, no backup is taken).
 resource "azurerm_static_web_app" "athin" {
   name                = "azstaticwebapps-pogi"
   resource_group_name = azurerm_resource_group.rg.name
@@ -22,21 +22,6 @@ resource "azurerm_web_pubsub_hub" "athin" {
   name          = "chat"
   web_pubsub_id = azurerm_web_pubsub.athin.id
   depends_on    = [azurerm_web_pubsub.athin]
-}
-
-resource "azurerm_notification_hub_namespace" "athin" {
-  name                = "aznotificationhubs-pogi"
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = azurerm_resource_group.rg.location
-  namespace_type      = "NotificationHub"
-  sku_name            = "Free"
-}
-
-resource "azurerm_notification_hub" "athin" {
-  name                = "orders"
-  namespace_name      = azurerm_notification_hub_namespace.athin.name
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = azurerm_resource_group.rg.location
 }
 
 resource "azurerm_relay_namespace" "athin" {

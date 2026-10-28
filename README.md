@@ -5,16 +5,18 @@
   </picture>
 </p>
 
+<h3 align="center">The whole cloud on your machine ☁️</h3>
+
 <p align="center">
-  <b>The whole cloud on your machine.</b><br>
-  AWS, Google Cloud and Azure in one small program, on one port. Free, offline, no account.
+  AWS, Google Cloud and Azure in one small program, on one port.<br>
+  Free, offline, no account.
 </p>
 
 <p align="center">
-  <a href="docs/README.md">Docs</a> ·
-  <a href="#install">Install</a> ·
-  <a href="CHANGELOG.md">Changelog</a> ·
-  <a href="https://pogi.nrnx.dev">Website</a>
+  <a href="docs/README.md">📖 Docs</a> ·
+  <a href="#-install">📦 Install</a> ·
+  <a href="CHANGELOG.md">📝 Changelog</a> ·
+  <a href="https://pogi.nrnx.dev">🌐 Website</a>
 </p>
 
 <p align="center">
@@ -29,56 +31,67 @@
   <img src="docs/images/demo.gif" width="880" alt="Typing pogi opens its terminal screen. Calls from the AWS, Google Cloud and Azure CLIs fill the Overview with the services in use and recent calls. The Requests tab lists all 14 calls to S3, SQS, SNS, DynamoDB, Cloud Storage, Pub/Sub and Blob Storage, each answering 200 or 201. The Flows tab shows the hand-offs between services, such as an SNS message delivered to an SQS queue.">
 </p>
 
-pogi runs AWS, Google Cloud and Azure on your laptop. Point your SDKs, the cloud CLIs, Terraform or the CDK at it, and they work the way they do against the real cloud: no account, no bill, and nothing leaves your machine. It is one program on one port, and it starts in about 30 ms. It covers <!-- count:total -->355 services: 144 AWS (90 with real behavior, 54 Thin), 108 Google Cloud (25 with real behavior, 83 Thin) and 103 Azure (30 with real behavior, 73 Thin)<!-- /count -->. A Thin service keeps your resources and reads them back, but nothing runs behind them.
+## 👋 What is pogi?
+
+pogi runs AWS, Google Cloud and Azure on your laptop. Point your SDKs, the cloud CLIs, Terraform or the CDK at it, and they work the way they do against the real cloud.
+
+- 💸 **No account, no bill.** Nothing leaves your machine.
+- ⚡ **One program, one port.** Everything answers on `localhost:7644`, and pogi starts in about 30 ms.
+- ☁️ **Three clouds.** No separate emulator for each one:
+
+| Cloud | Services | With real behavior | Thin |
+|---|--:|--:|--:|
+| AWS | <!-- count:aws_services -->144<!-- /count --> | <!-- count:aws_real -->90<!-- /count --> | <!-- count:aws_thin -->54<!-- /count --> |
+| Google Cloud | <!-- count:gcp_services -->108<!-- /count --> | <!-- count:gcp_real -->25<!-- /count --> | <!-- count:gcp_thin -->83<!-- /count --> |
+| Azure | <!-- count:azure_services -->103<!-- /count --> | <!-- count:azure_real -->30<!-- /count --> | <!-- count:azure_thin -->73<!-- /count --> |
+| **All** | **<!-- count:all_services -->355<!-- /count -->** | **<!-- count:all_real -->145<!-- /count -->** | **<!-- count:all_thin -->210<!-- /count -->** |
+
+A **Thin** service keeps your resources and reads them back, but nothing runs behind it. See [every service](#-services).
 
 > [!NOTE]
-> pogi is new, at version 0.x. Flags, config keys and APIs may still change between releases, and the [changelog](CHANGELOG.md) lists every change.
+> pogi is new, at version 0.x. Flags, config keys and APIs may still change between releases. The [changelog](CHANGELOG.md) lists every change.
 
-## Quick start
+## ✨ Why pogi
 
-**1. Install pogi.** On macOS, with Homebrew. For Linux, Windows, Docker and Go, see [Install](#install).
+- 🎯 **It behaves like the real thing.** pogi is tested with the official SDKs. Lambda runs Python and Node.js directly, Terraform and `cdk deploy` work, and services trigger each other as they do in the cloud: S3 to SQS, SNS to Lambda, Pub/Sub push, Event Grid and more.
+- 🧪 **It's made for tests.** Reset everything with one command. Save and load snapshots. Make chosen calls fail or slow down. Keep state on disk or in memory. Run it in CI, or start it inside your Go tests.
+- 🔁 **It's a drop-in for LocalStack.** It has the same health endpoint, init hooks and `Ready.` log line, and `--port 4566` keeps your old endpoint. See [Migrate from LocalStack](docs/how-to/migrate-from-localstack.md).
+- 🔒 **It stays on your machine.** pogi listens on 127.0.0.1 only, refuses requests from other websites and never phones home.
 
-```sh
-brew install nrndev/tap/pogi
-```
+## 🚀 Quick start
 
-**2. Start it.** This opens the terminal screen (the TUI). Add `--headless` for plain logs instead.
+1. **Install pogi.** On macOS, with Homebrew. For Linux, Windows, Docker and Go, see [Install](#-install).
 
-```sh
-pogi
-```
+   ```sh
+   brew install nrndev/tap/pogi
+   ```
 
-**3. Point your tools at it.** In a second terminal, this sets the endpoint and test credentials your tools read.
+2. **Start it.** This opens the terminal screen (the TUI). Add `--headless` for plain logs instead.
 
-```sh
-eval "$(pogi env)"
-```
+   ```sh
+   pogi
+   ```
 
-**4. Make something.** Use the CLIs you already have:
+3. **Point your tools at it.** In a second terminal, this sets the endpoint and the test credentials your tools read.
 
-```sh
-aws s3 mb s3://demo
-gcloud storage buckets create gs://demo
-az storage container create -n demo
-```
+   ```sh
+   eval "$(pogi env)"
+   ```
 
-**5. Look inside.** Open the web console at <http://localhost:7644/_pogi/>. It shows your buckets and every call you made.
+4. **Make something** with the CLIs you already have:
 
-Your own code needs nothing more. Only the endpoint and the credentials change, and `pogi env` sets both.
+   ```sh
+   aws s3 mb s3://demo
+   gcloud storage buckets create gs://demo
+   az storage container create -n demo
+   ```
 
-## Why pogi
+5. **Look inside.** Open the web console at <http://localhost:7644/_pogi/>. It shows your buckets and every call you made.
 
-**One place for three clouds.** AWS, Google Cloud and Azure all answer on `localhost:7644`. That covers <!-- count:total -->355 services: 144 AWS (90 with real behavior, 54 Thin), 108 Google Cloud (25 with real behavior, 83 Thin) and 103 Azure (30 with real behavior, 73 Thin)<!-- /count -->. You don't need a separate emulator for each cloud.
+> [!TIP]
+> Your own code needs nothing more. Only the endpoint and the credentials change, and `pogi env` sets both.
 
-**It behaves like the real thing.** pogi is tested with the official SDKs. Lambda runs Python and Node.js directly, Terraform and `cdk deploy` work, and services trigger each other as they do in the cloud: S3 to SQS, SNS to Lambda, Pub/Sub push, Event Grid and more.
-
-**It's made for tests.** Reset everything with one command. Save and load snapshots. Make chosen calls fail or slow down. Keep state on disk or in memory. Run it in CI, or start it inside your Go tests.
-
-**It's a drop-in for LocalStack.** It has the same health endpoint, init hooks and `Ready.` log line. `--port 4566` keeps your old endpoint. See [Migrate from LocalStack](docs/how-to/migrate-from-localstack.md).
-
-**It stays on your machine.** pogi listens on 127.0.0.1 only, refuses requests from other websites and never phones home.
-
-## The console
+## 🖥️ The console
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/console-dark.jpg">
@@ -87,17 +100,17 @@ Your own code needs nothing more. Only the endpoint and the credentials change, 
 
 While pogi runs, the web console at `http://localhost:7644/_pogi/` shows what your code did:
 
-- every call, and the chain of calls one request set off across services;
-- a map of your resources and how they connect, with live traffic;
-- a least-privilege IAM policy (IAM is the set of rules for who may call what), built from what each caller really did. Enforce it with `--iam soft` or `--iam strict`;
-- a rough monthly estimate of what your setup would cost in the real clouds;
-- what a Terraform folder or plan would cost a month on the real cloud, plus a diagram of its resources and what a plan changes. Use `pogi cost ./infra` or the console's Cost page. pogi reads the files itself and never runs Terraform. Google Cloud prices are not included yet. See [Estimate Terraform cost](docs/how-to/estimate-terraform-cost.md);
-- chaos rules and snapshots;
-- a SQL editor, your secrets, and an inbox for the email, SMS and push messages your apps sent.
+- 🔎 **Activity and Flows:** every call, and the chain of calls one request set off across services.
+- 🗺️ **Map:** your resources and how they connect, with live traffic.
+- 🔐 **IAM policy:** a least-privilege policy (IAM is the set of rules for who may call what), built from what each caller really did. Enforce it with `--iam soft` or `--iam strict`.
+- 💰 **Cost:** a rough monthly estimate of what your setup would cost in the real clouds.
+- 🏗️ **Terraform cost:** what a Terraform folder or plan would cost a month, plus a diagram of its resources and what a plan changes. Use `pogi cost ./infra` or the **Terraform** tab on the Cost page. pogi reads the files itself and never runs Terraform. Google Cloud prices are not included yet. See [Estimate Terraform cost](docs/how-to/estimate-terraform-cost.md).
+- 💥 **Chaos and Snapshots:** make chosen calls fail or slow down, and save and load state.
+- 🧰 **SQL editor, Secrets and Inbox:** query your databases, read your secrets, and see the email, SMS and push messages your apps sent.
 
-## Use it from your coding agent
+## 🤖 Use it from your coding agent
 
-pogi has a built-in MCP server. MCP is the protocol AI coding agents use to call tools, so agents such as Claude Code, Cursor and Codex can look inside your local cloud and drive it while they work. An agent can deploy a stack, invoke the function it just wrote, read the function's logs, peek at a queue and check which IAM calls were denied, all without touching a real account.
+pogi has a built-in MCP server. MCP is the protocol AI coding agents use to call tools, so agents such as Claude Code, Cursor and Codex can look inside your local cloud and drive it while they work, all without touching a real account.
 
 Add it to Claude Code with one line. pogi must be running:
 
@@ -107,25 +120,27 @@ claude mcp add pogi -- pogi mcp
 
 `pogi mcp --print-config` prints the setup for Cursor and Codex too. `pogi agents init` adds a short brief on using pogi to your project's AGENTS.md.
 
-The server has 24 tools. Agents use them to:
+The server has 24 tools:
 
-- see what's there: resources, their details, the request log, and any request in full;
-- debug: IAM decisions, messages waiting in a queue, the email and SMS your app sent, function logs;
-- price Terraform: what a folder or plan costs, and the sizes of a machine type;
-- act: invoke a function, deploy or delete a CloudFormation stack, seed resources, and reset;
-- test failure: save and load snapshots, and add or clear chaos rules.
+| To | An agent can |
+|---|---|
+| 👀&nbsp;**Look** | list resources and their details, read the request log, and open any request in full |
+| 🐛&nbsp;**Debug** | check IAM decisions, peek at queued messages, read the email and SMS your app sent, and read function logs |
+| 💲&nbsp;**Price** | price a Terraform folder or plan, and look up the sizes of a machine type |
+| 🛠️&nbsp;**Act** | invoke a function, deploy or delete a CloudFormation stack, seed resources, and reset |
+| 💥&nbsp;**Break** | save and load snapshots, and add or clear chaos rules |
 
 Cloud calls still go through the normal SDKs and CLIs, so the agent tests your code the way you would. The [CLI reference](docs/reference/cli.md#pogi-mcp-run-the-mcp-server-for-ai-agents) lists every tool.
 
-## Install
+## 📦 Install
 
-**macOS** with Homebrew:
+**🍎 macOS** with Homebrew:
 
 ```sh
 brew install nrndev/tap/pogi
 ```
 
-**Linux** (Debian, Ubuntu) with the `.deb` package. On Arm, use `arm64` in place of `amd64`:
+**🐧 Linux** (Debian, Ubuntu) with the `.deb` package. On Arm, use `arm64` in place of `amd64`:
 
 ```sh
 curl -LO https://github.com/nrndev/pogi/releases/download/v0.2.0/pogi_0.2.0_linux_amd64.deb
@@ -134,20 +149,20 @@ sudo apt install ./pogi_0.2.0_linux_amd64.deb
 
 Fedora, RHEL and Amazon Linux use the `.rpm` from the same place: `sudo dnf install ./pogi_0.2.0_linux_amd64.rpm`.
 
-**Windows** with Scoop:
+**🪟 Windows** with Scoop:
 
 ```powershell
 scoop bucket add nrndev https://github.com/nrndev/scoop-bucket
 scoop install nrndev/pogi
 ```
 
-**Docker**, with nothing else to install. The image includes Python and Node.js, so functions run inside it. Ports 10000 to 10002 are for Azure Storage.
+**🐳 Docker**, with nothing else to install. The image includes Python and Node.js, so functions run inside it. Ports 10000 to 10002 are for Azure Storage.
 
 ```sh
 docker run --rm -p 127.0.0.1:7644:7644 -p 127.0.0.1:10000-10002:10000-10002 ghcr.io/nrndev/pogi
 ```
 
-**Go**, version 1.27.3 or newer:
+**🐹 Go**, version 1.27.3 or newer:
 
 ```sh
 go install github.com/nrndev/pogi/cmd/pogi@latest
@@ -155,7 +170,7 @@ go install github.com/nrndev/pogi/cmd/pogi@latest
 
 You can also download a binary for Linux, macOS or Windows, on Intel or Arm, from the [releases page](https://github.com/nrndev/pogi/releases). After installing, run `pogi doctor` to check your setup. [Install pogi](docs/how-to/install.md) has more detail.
 
-## Use it with
+## 🔌 Use it with
 
 | Tool | How |
 |---|---|
@@ -165,9 +180,11 @@ You can also download a binary for Linux, macOS or Windows, on Intel or Arm, fro
 | Google Cloud | Client libraries and `gcloud` read the variables `pogi env` sets. [Google Cloud](docs/how-to/connect-your-tools.md#google-cloud) |
 | Azure | Azurite ports for storage, HTTPS for Cosmos DB and Key Vault. [Azure](docs/how-to/connect-your-tools.md#azure) |
 | Go tests | Start pogi in-process from your tests. [Go tests](docs/how-to/connect-your-tools.md#go-tests) |
-| Coding agents | `pogi mcp`, and `pogi agents init` for AGENTS.md. [Use it from your coding agent](#use-it-from-your-coding-agent) |
+| Coding agents | `pogi mcp`, and `pogi agents init` for AGENTS.md. [Use it from your coding agent](#-use-it-from-your-coding-agent) |
 
-## Services
+## 📋 Services
+
+Most services run inside pogi itself. The ones marked "with Docker running" start real software, such as Postgres, Redis or Kafka, in Docker (or any engine with the Docker API: Podman, Colima or OrbStack).
 
 <details>
 <summary><!-- count:total -->355 services: 144 AWS (90 with real behavior, 54 Thin), 108 Google Cloud (25 with real behavior, 83 Thin) and 103 Azure (30 with real behavior, 73 Thin)<!-- /count -->. Click to see them all.</summary>
@@ -182,23 +199,21 @@ You can also download a binary for Linux, macOS or Windows, on Intel or Arm, fro
 
 </details>
 
-Most services run inside pogi itself. The ones marked "with Docker running" start real software, such as Postgres, Redis or Kafka, in Docker (or any engine with the Docker API: Podman, Colima or OrbStack).
+The [coverage page](docs/reference/coverage.md) says what each service does and what it doesn't do yet.
 
-## What pogi doesn't do
+## ⚠️ What pogi doesn't do
 
-pogi is not the real cloud. Some services have real behavior wired to other services. A Thin service stores your resources and reads them back, and nothing runs behind it. The [coverage page](docs/reference/coverage.md) says what each service does and what it doesn't do yet.
+- ☁️ **It's not the real cloud.** Some services have real behavior wired to other services. A Thin service stores your resources and reads them back, and nothing runs behind it.
+- 🧪 **It's built for tests and local development.** It keeps data in memory by default and limits uploads to 10 MB (raise that with `--max-upload-mb`). Don't run it as a server for other people.
+- 🔑 **It never calls the real clouds,** so never give it real credentials. `pogi env` sets test ones for you.
 
-It's built for tests and local development. It keeps data in memory by default and limits uploads to 10 MB (raise that with `--max-upload-mb`). Don't run it as a server for other people.
+## 📚 Learn more
 
-It never calls the real clouds, so never give it real credentials. `pogi env` sets test ones for you.
+- 📖 **Docs:** [tutorials, how-to guides, reference and explanation](docs/README.md). New here? Start with the [first run tutorial](docs/tutorials/first-run.md), or read the [FAQ](docs/explanation/faq.md).
+- 🤝 **Contributing:** bug reports, ideas and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers building, testing, adding a service and running the security scans.
+- 🛡️ **Security:** report vulnerabilities privately, as [SECURITY.md](SECURITY.md) describes.
+- ⚖️ **License:** [MIT](LICENSE). Some AWS services are generated from the AWS API models, which are under the Apache 2.0 license ([NOTICE](NOTICE)).
 
 ## Third-party icons
 
 The console and the Terraform diagram show the official AWS, Azure and Google Cloud icons. They are in `internal/web/icons/`, unchanged, and they are **not** under the MIT license: each provider's terms apply. See [internal/web/icons/NOTICE](internal/web/icons/NOTICE). A service with no official icon shows one of pogi's own plain glyphs.
-
-## Learn more
-
-- **Docs:** [tutorials, how-to guides, reference and explanation](docs/README.md). New here? Start with the [first run tutorial](docs/tutorials/first-run.md), or read the [FAQ](docs/explanation/faq.md).
-- **Contributing:** bug reports, ideas and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers building, testing, adding a service and running the security scans.
-- **Security:** report vulnerabilities privately, as [SECURITY.md](SECURITY.md) describes.
-- **License:** [MIT](LICENSE). Some AWS services are generated from the AWS API models, which are under the Apache 2.0 license ([NOTICE](NOTICE)).

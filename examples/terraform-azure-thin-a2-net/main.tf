@@ -1,6 +1,7 @@
 # Azure networking products on pogi's generic engine: Network Watcher, DDoS Protection, Virtual Network
-# Manager, Route Server, ExpressRoute, VPN Gateway, Web Application Firewall policies and Application Gateway
-# for Containers. They are stored and read back; no traffic flows. Run as the conformance block azurerm-a2-net.
+# Manager, Route Server, ExpressRoute, VPN Gateway, and Web Application Firewall policies. They are stored and
+# read back; no traffic flows. Run as the conformance block azurerm-a2-net. Application Gateway for Containers
+# is in terraform-azure-thin-a2-alb: the provider waits five minutes before it deletes one, so it has its own job.
 terraform {
   required_providers {
     azurerm = { source = "hashicorp/azurerm" }
@@ -33,20 +34,6 @@ resource "azurerm_subnet" "route_server" {
   resource_group_name  = azurerm_resource_group.rg.name
   virtual_network_name = azurerm_virtual_network.vnet.name
   address_prefixes     = ["10.30.2.0/24"]
-}
-
-resource "azurerm_subnet" "alb" {
-  name                 = "a2net-alb"
-  resource_group_name  = azurerm_resource_group.rg.name
-  virtual_network_name = azurerm_virtual_network.vnet.name
-  address_prefixes     = ["10.30.3.0/24"]
-  delegation {
-    name = "alb"
-    service_delegation {
-      name    = "Microsoft.ServiceNetworking/trafficControllers"
-      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
-    }
-  }
 }
 
 resource "azurerm_public_ip" "vpn" {
@@ -182,22 +169,4 @@ resource "azurerm_web_application_firewall_policy" "waf" {
       version = "3.2"
     }
   }
-}
-
-# Application Gateway for Containers
-resource "azurerm_application_load_balancer" "alb" {
-  name                = "a2net-alb"
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = azurerm_resource_group.rg.location
-}
-
-resource "azurerm_application_load_balancer_frontend" "fe" {
-  name                         = "a2net-frontend"
-  application_load_balancer_id = azurerm_application_load_balancer.alb.id
-}
-
-resource "azurerm_application_load_balancer_subnet_association" "assoc" {
-  name                         = "a2net-assoc"
-  application_load_balancer_id = azurerm_application_load_balancer.alb.id
-  subnet_id                    = azurerm_subnet.alb.id
 }

@@ -1,21 +1,39 @@
 name: preflight
+# A push or pull request that changes only Markdown files (README, CHANGELOG, docs) does not start a run: 18 jobs
+# for a text change is a waste. The tests that read Markdown (test/coverage_test.go: the README's Services table,
+# the service counts, the docs' links) then run with the next code change and in the full gate before a release.
 on:
   push:
     branches: [main]
+    paths-ignore: ["**.md"]
   pull_request:
+    paths-ignore: ["**.md"]
 permissions:
   contents: read
 # A newer push cancels the run still going for the same branch.
 concurrency:
   group: preflight-${{ github.ref }}
   cancel-in-progress: true
+# proxy.golang.org sometimes drops a module download halfway ("stream error ... INTERNAL_ERROR"). With no module
+# cache every job downloads its modules afresh, so one dropped download used to fail a job. "|" tells Go to try the
+# next entry on any error, so listing the proxy twice retries a failed download once (Go empties the half-written
+# file first). ",direct" is Go's default: fetch from the source only when the proxy does not have a module.
+env:
+  GOPROXY: https://proxy.golang.org|https://proxy.golang.org,direct
 # Every job calls scripts/ci.sh, so the same checks run on a laptop: scripts/ci.sh [step ...].
-# At most 20 jobs run side by side (the free plan's limit). The 10 test groups, 9 conformance blocks, and build,
-# lint, security and config make 23, so the last few wait for a free slot. The short "plan" job finishes
-# before the test groups start.
 #
-# Each Go job has its own build cache (actions/cache, keyed by the job and go.sum), so a job restores the cache
-# that the same job saved. setup-go's single shared cache is off.
+# Jobs: plan (the list of test groups), 7 "lint and test" jobs, 8 conformance jobs, one "config" job (config
+# checks and security scans) and one "cross" job: 18 at once. The free plan allows 20 at once for the whole
+# account. CodeQL and the scheduled scans run weekly and on release tags, not here, but may hold a slot when
+# they do, so stay at 18 or fewer.
+#
+# No caches. Every job starts cold, so every run takes about the same time and there is nothing to keep up.
+# setup-go's own cache is off. The slowest jobs are bound by the azurerm provider's own waits, not by compiling.
+#
+# Lint runs inside the test jobs, not in a job of its own. About 80% of lint is compiling the cloud SDK clients
+# that only tests import. A test job lints its group first with the same build flags as its tests (-race), so
+# the tests reuse that compile and only the test mains are left. That costs a test job about 18% more, and a
+# separate lint job would compile the same code again.
 jobs:
   # The list of test groups comes from scripts/ci.sh, the only place they are defined.
   plan:
@@ -33,16 +51,13 @@ jobs:
           persist-credentials: false
       - id: groups
         run: echo "list=$(scripts/ci.sh groups | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
-  # Format, vet and build, then one cross-compile per release platform, all in parallel.
-  build:
+  # One cross build for three platforms, one after the other. Pogi has OS-specific files (internal/core) but none
+  # that depend on the architecture, the other jobs build linux/amd64, and GoReleaser builds all six at release,
+  # so these three cover every OS and the two other architectures.
+  cross:
     if: github.repository == 'nrndev/pogi' # runs only in the public repo, not in forks or mirrors
-    name: build (${{ matrix.target }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [checks, linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64]
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -53,54 +68,15 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-          cache: false # the cache below is per job
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: build-${{ matrix.target }}-${{ hashFiles('go.sum') }}
-          restore-keys: build-${{ matrix.target }}-
-      - if: matrix.target == 'checks'
-        run: scripts/ci.sh fmt vet build
-      - if: matrix.target != 'checks'
-        run: scripts/ci.sh cross "$TARGET"
-        env:
-          TARGET: ${{ matrix.target }}
-  # golangci-lint (config: .golangci.yml). The action installs it and keeps its own result cache.
-  lint:
-    if: github.repository == 'nrndev/pogi' # runs only in the public repo, not in forks or mirrors
-    runs-on: ubuntu-latest
-    timeout-minutes: 30 # golangci-lint itself stops at 25m (.golangci.yml): a cold cache needs more than 10
-    steps:
-      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version-file: go.mod
-          cache: false # the cache below is per job
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-lint-${{ hashFiles('go.sum') }}
-          restore-keys: go-lint-
-      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: v2.14.0 # pinned golangci-lint: a new release may add checks that fail the build
-          install-only: true
-      - run: scripts/ci.sh lint
-  # The config files themselves: every package is in one test group, the workflows are clean (actionlint,
-  # zizmor), and the release config is valid.
+          cache: false
+      - run: scripts/ci.sh cross windows/amd64 darwin/arm64 linux/arm64
+  # The config files, then the security scans. Config: gofmt finds nothing to change (it also checks files lint
+  # does not load), every package is in one test group, the workflows are clean (actionlint, zizmor), and the
+  # release config is valid. Then the scans below.
   config:
     if: github.repository == 'nrndev/pogi' # runs only in the public repo, not in forks or mirrors
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15 # the image build compiles pogi inside Docker
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -111,17 +87,27 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-          cache: false # no cache here: GoReleaser, which zizmor treats as a publisher, is installed in this job
+          cache: false
       # The release config (signing, SBOMs, images, brew, scoop), checked on every push, not first at tag time.
       - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
           version: v2.18.3 # pinned goreleaser: a new release may deprecate a field and fail the check
           install-only: true
       - run: pipx install zizmor==1.30.1 # pinned zizmor
-      - run: scripts/ci.sh coverage release-check workflows
+      - run: scripts/ci.sh fmt coverage release-check workflows
         env:
           GH_TOKEN: ${{ github.token }} # for the zizmor audits that ask GitHub
-  # The race tests, one job per group, so a red job names its area. Tests that need Docker (Kubernetes,
+      # govulncheck fails if pogi's code calls a Go module with a known vulnerability. Trivy fails on fixable
+      # HIGH or CRITICAL vulnerabilities and on secrets. Config scanning (Dockerfiles, examples/terraform) only
+      # reports, because the owner is still picking which findings to fix.
+      # "image" builds Dockerfile and runs Trivy on it, and fails on a fixable HIGH or CRITICAL CVE. The image
+      # that ships (Dockerfile.release, built by GoReleaser) has the same Alpine base and apk packages, so this
+      # covers what ships. Docker is on the runner; the Trivy image is pinned in scripts/security-scan.sh.
+      - if: ${{ !cancelled() }} # run the scans even when a config check failed, so one run shows both
+        run: scripts/ci.sh security vuln trivy image
+  # Lint and the race tests, one job per group, so a red job names its area. Lint (golangci-lint, config
+  # .golangci.yml) runs first with the tests' own build flags (-race), so it compiles the cloud SDK clients once
+  # and the tests reuse them. That is cheaper than a lint job of its own. Tests that need Docker (Kubernetes,
   # databases, EC2, ECS and the other container-backed services) skip themselves here: DOCKER_HOST points at
   # nothing. They run on a developer machine in the full gate (scripts/ci.sh gate) before every release. A
   # package that hangs fails after 8 minutes with every goroutine's stack. gotestsum prints a short log, writes
@@ -129,8 +115,9 @@ jobs:
   test:
     needs: plan
     if: github.repository == 'nrndev/pogi' # runs only in the public repo, not in forks or mirrors
+    name: lint and test (${{ matrix.group }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -145,20 +132,22 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-          cache: false # the cache below is per group
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+          cache: false
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-test-${{ matrix.group }}-${{ hashFiles('go.sum') }}
-          restore-keys: go-test-${{ matrix.group }}-
+          version: v2.14.0 # pinned golangci-lint: a new release may add checks that fail the build
+          install-only: true
+          skip-cache: true # no result cache saved or restored
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
+      - name: lint (${{ matrix.group }})
+        run: scripts/ci.sh lint "$GROUP"
+        env:
+          GROUP: ${{ matrix.group }}
       - name: race tests (${{ matrix.group }})
         run: scripts/ci.sh test "$GROUP"
         env:
@@ -170,17 +159,31 @@ jobs:
           path: test-results
           retention-days: 7
           if-no-files-found: ignore
-  # Real Terraform and CDK projects against a fresh pogi, one block per job, side by side. Docker is on here:
-  # the compute and azurerm blocks need it. Provider and npm downloads are cached between runs, with the Go
-  # build cache.
+  # Real Terraform and CDK projects against a fresh pogi, one job per entry, side by side. Docker is on here:
+  # the compute and azurerm blocks need it. Terraform providers and npm packages are downloaded on each run (no
+  # cache of them). TF_PLUGIN_CACHE_DIR only shares a download between the blocks of one job.
   conformance:
     if: github.repository == 'nrndev/pogi' # runs only in the public repo, not in forks or mirrors
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    name: conformance (${{ matrix.blocks }})
     strategy:
       fail-fast: false
       matrix:
-        block: [aws, compute, google, azurerm, longtail, google-thin, azurerm-thin, aws-thin, cdk]
+        # Each entry is the blocks one job runs, one after the other (scripts/conformance.sh takes several).
+        # Balanced by the time each takes, so every job runs about 7 to 8 minutes, set-up included: the azurerm
+        # provider waits minutes on some deletes (ALB 5 min, hubs 5 min, policy 5 min, key vault 2 min), so each
+        # of those has a job. A "terraform-<cloud>-thin-<group>" example folder is the block <google|azurerm|aws>-<group>;
+        # "scripts/ci.sh coverage" fails when a folder is in no entry.
+        blocks:
+          - "azurerm-a2-alb"
+          - "azurerm-a2-hubs"
+          - "azurerm-a2-policy"
+          - "azurerm"
+          - "aws aws-c"
+          - "azurerm-a2-data azurerm-a2-net google google-thin"
+          - "azurerm-a2-sec longtail aws-aws-b"
+          - "aws-aws-a compute azurerm-a2-compute cdk"
     env:
       TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.tf-plugins
     steps:
@@ -193,7 +196,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-          cache: false # the cache below is per block
+          cache: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
@@ -203,41 +206,7 @@ jobs:
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_wrapper: false
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
-        with:
-          path: |
-            .tf-plugins
-            ~/.npm
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: conformance-${{ matrix.block }}-${{ hashFiles('go.sum', 'examples/**/*.tf', 'examples/cdk/package.json') }}
-          restore-keys: conformance-${{ matrix.block }}-
-      - run: scripts/ci.sh conformance "$BLOCK"
+      # $BLOCKS is one argument with a block name per word; conformance.sh reads it as a list.
+      - run: scripts/ci.sh conformance "$BLOCKS"
         env:
-          BLOCK: ${{ matrix.block }}
-  security:
-    if: github.repository == 'nrndev/pogi' # runs only in the public repo, not in forks or mirrors
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version-file: go.mod
-          cache: false # the cache below is per job
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-security-${{ hashFiles('go.sum') }}
-          restore-keys: go-security-
-      # govulncheck fails if pogi's code calls a Go module with a known vulnerability. Trivy fails on fixable
-      # HIGH or CRITICAL vulnerabilities and on secrets. Config scanning (Dockerfiles, examples/terraform) only
-      # reports, because the owner is still picking which findings to fix.
-      - run: scripts/ci.sh security vuln trivy
+          BLOCKS: ${{ matrix.blocks }}
