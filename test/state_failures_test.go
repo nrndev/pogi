@@ -44,7 +44,7 @@ func pogiBin(t *testing.T) string {
 	binOnce.Do(func() {
 		binDir, _ = os.MkdirTemp("", "pogi-failmode-bin")
 		binPath = filepath.Join(binDir, "pogi")
-		out, err := exec.Command("go", "build", "-o", binPath, "../cmd/pogi").CombinedOutput()
+		out, err := exec.Command("go", append(goBuildArgs(), "-o", binPath, "../cmd/pogi")...).CombinedOutput()
 		if err != nil {
 			binPath = ""
 			t.Logf("build: %v\n%s", err, out)

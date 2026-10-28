@@ -1,4 +1,4 @@
-# Services of pogi's generic Azure engine: DNS and Logic Apps (Policy is in terraform-azure-thin-a2-hubs). Nothing
+# Services of pogi's generic Azure engine: DNS and Logic Apps (Policy is in terraform-azure-thin-a2-policy). Nothing
 # runs behind a zone or a workflow: a zone answers no queries and a workflow never fires.
 resource "azurerm_dns_zone" "generic" {
   name                = "generic.example.test"

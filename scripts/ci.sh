@@ -7,11 +7,9 @@
 #   fmt              gofmt finds nothing to change
 #   vet              go vet ./...
 #   build            builds ./cmd/pogi and runs "pogi version"
-#   compile          compiles everything the other CI jobs compile (go build ./..., the -race test binaries, gotestsum)
-#                    so the checks job can save a warm Go build cache; runs no tests
 #   cross [os/arch ...]  builds ./cmd/pogi for the given platforms, default all six release ones (CGO off)
 #   release-check    goreleaser check (the release config)
-#   lint             golangci-lint (config: .golangci.yml)
+#   lint [group]     golangci-lint (config: .golangci.yml): every package, or one test group's, built with -race
 #   workflows        actionlint and zizmor on .github/workflows
 #   coverage         every Go package is in exactly one test group
 #   groups           prints the test group names, one per line
@@ -41,15 +39,20 @@ platforms="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windo
 
 # --- test groups -------------------------------------------------------------
 # The only place the groups are defined. Each group is a pattern on the package path (it starts with "./",
-# the module root is "./."). One group per cloud, plus core. CI runs them side by side with Docker off (about
-# 17 minutes of test time in all, most of it compiling). "coverage" fails when a package is in no group or in two,
-# so a new package makes CI fail until it is put in a group.
-test_groups="core aws azure gcp"
+# the module root is "./."). Core, one group for GCP, and the big clouds split by the first letter of the
+# service folder. The letters are set by measured cold compile time (4 cores), so no group takes much more
+# than 1.3 times another in its cloud: aws about 79 / 100 / 82 s, azure 62 / 77 s, gcp 99 s, core 66 s. Move a
+# boundary when a service is added and one group runs long. CI runs the groups side by side with Docker off.
+# "coverage" fails when a package is in no group or in two, so a new package makes CI fail until it is put in one.
+test_groups="core aws-a-f aws-g-m aws-n-z azure-a-c azure-d-z gcp"
 
 group_pattern() {
   case $1 in
-    aws)   echo 'internal/aws(/|$)' ;;
-    azure) echo 'internal/azure(/|$)' ;;
+    aws-a-f)   echo 'internal/aws/[a-f]' ;;
+    aws-g-m)   echo 'internal/aws/[g-m]' ;;
+    aws-n-z)   echo 'internal/aws/[n-z]' ;;
+    azure-a-c) echo 'internal/azure/[a-c]' ;;
+    azure-d-z) echo 'internal/azure/[d-z]' ;;
     gcp)   echo 'internal/gcp(/|$)' ;;
     core)  echo '(\.|cmd|scripts|test|internal/(aimodel|amqp|awstest|config|core|cost|docker|duckdb|mcp|seed|terraform|tui|web))(/|$)' ;;
     *)     return 1 ;;
@@ -85,6 +88,14 @@ list_pkgs() {
   go list ./... | sed -e "s#^$mod\$#./.#" -e "s#^$mod/#./#"
 }
 
+# group_pkgs <group>: the group's packages, one word each.
+group_pkgs() {
+  pat=$(group_pattern "$1") || die "unknown group: $1 (choose from: $test_groups)"
+  pkgs=$(list_pkgs | grep -E "^\\./($pat)" || true)
+  [ -n "$pkgs" ] || die "group $1 has no package"
+  echo "$pkgs"
+}
+
 # --- steps -------------------------------------------------------------------
 
 step_fmt() {
@@ -102,17 +113,6 @@ step_build() {
   "$tmp/pogi" version
 }
 
-# Fills the Go build cache with what the test and conformance jobs need. The flags must match theirs: -race
-# (step_test) and a plain build (conformance.sh, and the tests that run "go build" on pogi).
-# "go list -export" compiles every package, test variants too, without linking or starting a test binary, so it
-# is much faster than "go test -run '^$'". Only each test's small generated main is left to compile.
-step_compile() {
-  go build ./...
-  go list -test -export -deps ./... >/dev/null
-  go list -race -test -export -deps ./... >/dev/null
-  go run "$gotestsum_pkg" --version >/dev/null
-}
-
 # step_cross [os/arch ...]: CI runs one platform per job, in parallel.
 step_cross() {
   [ $# -gt 0 ] || set -- $platforms
@@ -128,10 +128,15 @@ step_release_check() {
   goreleaser check
 }
 
+# step_lint [group]: with a group, only that group's packages, built with -race like step_test, so the test job
+# that follows reuses what lint compiled. Without one, every package (a release and the gate use that).
 step_lint() {
   need golangci-lint || return 0
   warn_version golangci-lint "$(golangci-lint --version | sed -n 's/^golangci-lint has version \([0-9.]*\).*/\1/p')" "$(pinned golangci-lint)"
-  golangci-lint run ./...
+  if [ $# -eq 0 ]; then golangci-lint run ./...; return; fi
+  pkgs=$(group_pkgs "$1")
+  # shellcheck disable=SC2086
+  GOFLAGS=-race golangci-lint run $pkgs
 }
 
 step_workflows() {
@@ -181,9 +186,7 @@ step_test() {
     return 0
   fi
   g=$1
-  pat=$(group_pattern "$g") || die "unknown group: $g (choose from: $test_groups all)"
-  pkgs=$(list_pkgs | grep -E "^\\./($pat)" || true)
-  [ -n "$pkgs" ] || die "group $g has no package"
+  pkgs=$(group_pkgs "$g")
   set -- --format pkgname-and-test-fails --format-hide-empty-pkg --hide-summary skipped
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     need jq || return 1
@@ -241,7 +244,7 @@ step_report() {
 }
 
 step_conformance() {
-  # Terraform keeps its provider downloads here, between runs (CI caches the folder).
+  # Terraform keeps its provider downloads here, between runs (only the blocks of one job share it).
   [ -z "${TF_PLUGIN_CACHE_DIR:-}" ] || mkdir -p "$TF_PLUGIN_CACHE_DIR"
   sh scripts/conformance.sh "$@"
 }
@@ -286,7 +289,9 @@ step_gate() {
 while [ $# -gt 0 ]; do
   s=$1; shift
   case $s in
-    fmt|vet|build|compile|lint|workflows|coverage|groups|gate) "step_$s" ;;
+    lint) # takes a group name when one follows
+      if [ $# -gt 0 ] && group_pattern "$1" >/dev/null 2>&1; then step_lint "$1"; shift; else step_lint; fi ;;
+    fmt|vet|build|workflows|coverage|groups|gate) "step_$s" ;;
     cross) # takes the os/arch arguments that follow it
       ps=""; while [ $# -gt 0 ] && case $1 in */*) true ;; *) false ;; esac; do ps="$ps $1"; shift; done
       step_cross $ps ;;
@@ -294,6 +299,6 @@ while [ $# -gt 0 ]; do
     report) step_report "$@"; exit 0 ;;
     test|conformance|security|e2e) "step_$s" "$@"; exit $? ;; # these take the rest of the arguments
     notes) step_notes "${1:-}"; exit $? ;;
-    *) die "unknown step: $s (fmt vet build compile cross release-check lint workflows coverage groups test conformance security e2e notes gate)" ;;
+    *) die "unknown step: $s (fmt vet build cross release-check lint workflows coverage groups test conformance security e2e notes gate)" ;;
   esac
 done

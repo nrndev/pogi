@@ -1,8 +1,8 @@
 # golangci-lint v2. A small, strict set: every finding is fixed or excluded below with a reason.
 version: "2"
 run:
-  # With a cold cache (GitHub drops a cache unused for 7 days), loading every package on a 2-core runner takes
-  # more than 10 minutes since v0.2.0. A warm run takes a few.
+  # CI has no cache, so every run is cold. A test job lints one group of packages on a 4-core runner, about a
+  # minute and a half. Linting every package (a release, the gate) takes a few minutes on a laptop.
   timeout: 25m
 linters:
   default: none
@@ -11,6 +11,14 @@ linters:
     - staticcheck
     - ineffassign
     - unused
+  settings:
+    govet:
+      # Every analyzer that "go vet" runs (the list of "go tool vet help"), so the vet CI step is not needed.
+      # golangci-lint's default set may leave some out. Check this list again when the Go version changes.
+      enable: [appends, asmdecl, assign, atomic, bools, buildtag, cgocall, composites, copylocks, defers,
+        directive, errorsas, framepointer, hostport, httpresponse, ifaceassert, loopclosure, lostcancel,
+        nilfunc, printf, shift, sigchanyzer, slog, stdmethods, stdversion, stringintconv, structtag,
+        testinggoroutine, tests, timeformat, unmarshal, unreachable, unsafeptr, unusedresult, waitgroup]
   exclusions:
     rules:
       # pogi's job is to answer like the real cloud, including with fields and calls the cloud SDKs now mark

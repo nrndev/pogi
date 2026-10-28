@@ -236,7 +236,7 @@ func fmFreePort(t testing.TB) int {
 func fmBuild(t testing.TB) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "pogi")
-	out, err := exec.Command("go", "build", "-o", bin, "../cmd/pogi").CombinedOutput()
+	out, err := exec.Command("go", append(goBuildArgs(), "-o", bin, "../cmd/pogi")...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}

@@ -1,5 +1,5 @@
 # Local builds. Publishing is the release workflow's job (goreleaser on a pushed tag); nothing here uploads.
-#   make test            vet and test with the race detector (make test G=<group>: one CI test group)
+#   make test            vet and test with the race detector (make test G=<group>: one CI test group, for example aws-a-f; see scripts/ci.sh groups)
 #   make ci              every CI check on this machine (scripts/ci.sh)
 #   make lint            golangci-lint
 #   make gate            the full pre-release gate: race tests with Docker on, then conformance
